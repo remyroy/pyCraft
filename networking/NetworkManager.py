@@ -14,7 +14,28 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES
 from Crypto.Cipher import PKCS1_v1_5
 
+from datetime import datetime
+
+from sqlalchemy import create_engine, MetaData, BigInteger, Integer, String
+from sqlalchemy import Column, Boolean, DateTime
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+
+
 EntityID = 0
+
+meta = MetaData()
+
+Base = declarative_base(metadata=meta)
+
+class PlayerListItem(Base):
+    __tablename__ = 'player_list_item'
+
+    id = Column(BigInteger, primary_key=True)
+    player = Column(String(32), nullable=False, index=True)
+    ping = Column(Integer, nullable=False)
+    online = Column(Boolean, nullable=False, index=True)
+    created_on = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 class ServerConnection(threading.Thread):
     
@@ -32,6 +53,9 @@ class ServerConnection(threading.Thread):
         else:
             self.NoGUI = False
         self.window = window
+
+        self.engine = create_engine(options.connection)
+        self.session = sessionmaker(bind=self.engine)()
         
     def disconnect(self, reason="Disconnected by user"):
         PacketSenderManager.sendFF(self.socket, reason)
@@ -312,6 +336,17 @@ class PacketListener(threading.Thread):
                 packet = PacketListenerManager.handleC8(self.FileObject)
             elif(response == "\xC9"):
                 packet = PacketListenerManager.handleC9(self.FileObject)
+
+                if packet['PlayerName'] != self.connection.username:
+
+                    pli = PlayerListItem()
+                    pli.player = packet['PlayerName']
+                    pli.ping = packet['Ping']
+                    pli.online = packet['Online']
+
+                    self.connection.session.add(pli)
+                    self.connection.session.commit()
+
             elif(response == "\xCA"):
                 packet = PacketListenerManager.handleCA(self.FileObject)
             elif(response == "\xCB"):
