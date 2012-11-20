@@ -17,7 +17,7 @@ from Crypto.Cipher import PKCS1_v1_5
 from datetime import datetime
 
 from sqlalchemy import create_engine, MetaData, BigInteger, Integer, String
-from sqlalchemy import Column, Boolean, DateTime
+from sqlalchemy import Column, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -28,11 +28,30 @@ meta = MetaData()
 
 Base = declarative_base(metadata=meta)
 
+class Server(Base):
+    __tablename__ = 'server'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    host = Column(String(128), nullable=False, index=True)
+    port = Column(Integer, nullable=False, index=True)
+    active = Column(Boolean, nullable=False, default=True)
+    created_on = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class Player(Base):
+    __tablename__ = 'player'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False)
+    active = Column(Boolean, nullable=False, default=True)
+    created_on = Column(DateTime, nullable=False, default=datetime.utcnow)
+
 class PlayerListItem(Base):
     __tablename__ = 'player_list_item'
 
     id = Column(BigInteger, primary_key=True)
-    player = Column(String(32), nullable=False, index=True)
+    server = Column(Integer, ForeignKey(Server.id), nullable=False, index=True)
+    player = Column(Integer, ForeignKey(Player.id), nullable=False, index=True)
     ping = Column(Integer, nullable=False)
     online = Column(Boolean, nullable=False, index=True)
     created_on = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -56,6 +75,14 @@ class ServerConnection(threading.Thread):
 
         self.engine = create_engine(options.connection)
         self.session = sessionmaker(bind=self.engine)()
+
+        mc_server = self.session.query(Server).filter_by(host=server, port=port,
+            active=True).first()
+
+        if mc_server is None:
+            sys.exit(1)
+
+        self.mc_server = mc_server.id
         
     def disconnect(self, reason="Disconnected by user"):
         PacketSenderManager.sendFF(self.socket, reason)
@@ -339,8 +366,19 @@ class PacketListener(threading.Thread):
 
                 if packet['PlayerName'] != self.connection.username:
 
+                    player = self.connection.session.query(Player
+                        ).filter_by(name=packet['PlayerName'], active=True
+                        ).first()
+
+                    if player is None:
+                        player = Player()
+                        player.name = packet['PlayerName']
+                        self.connection.session.add(player)
+                        self.connection.session.flush()
+
                     pli = PlayerListItem()
-                    pli.player = packet['PlayerName']
+                    pli.server = self.connection.mc_server
+                    pli.player = player.id
                     pli.ping = packet['Ping']
                     pli.online = packet['Online']
 
