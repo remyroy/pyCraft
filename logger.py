@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     start = datetime.utcnow()
 
-    delay = timedelta(seconds=5)
+    delay = timedelta(seconds=20)
 
     try:
         while datetime.utcnow() - start < delay:
