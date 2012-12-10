@@ -65,7 +65,7 @@ if __name__ == "__main__":
         host = stuff
         port = 25565
 
-    connection = NetworkManager.ServerConnection(None, derp['Username'], passwd, sessionid, host, port, options)
+    connection = NetworkManager.ServerConnection(derp['Username'], sessionid, host, port, options)
     connection.start()
 
     start = datetime.utcnow()
