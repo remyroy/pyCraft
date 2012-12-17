@@ -70,20 +70,14 @@ tps_rex = r'^8    TPS: 6(?P<tps>\d+(\.\d+)?)$'
 
 class ServerConnection(threading.Thread):
     
-    def __init__(self, window, username, password, sessionID, server, port, options=None):
+    def __init__(self, username, sessionID, server, port, options=None):
         threading.Thread.__init__(self)
         self.options = options
         self.isConnected = False
         self.username = username
-        self.password = password
         self.sessionID = sessionID
         self.server = server
         self.port = port
-        if(window == None):
-            self.NoGUI = True
-        else:
-            self.NoGUI = False
-        self.window = window
 
         self.engine = create_engine(options.connection)
         self.session = sessionmaker(bind=self.engine)()
@@ -132,17 +126,16 @@ class ServerConnection(threading.Thread):
             #Generate a 16 byte (128 bit) shared secret
             self.sharedSecret = _UserFriendlyRNG.get_random_bytes(16)
             
-            #Grab the server id
-            sha1 = hashlib.sha1()
-            sha1.update(packetFD['ServerID'])
-            sha1.update(self.sharedSecret)
-            sha1.update(packetFD['Public Key'])
-            #lovely java style hex digest by barneygale
-            serverid = Utils.javaHexDigest(sha1)
-            
             #Authenticate the server from sessions.minecraft.net
-            if(serverid != '-'):
+            if(packetFD['ServerID'] != '-'):
                 try:
+                    #Grab the server id
+                    sha1 = hashlib.sha1()
+                    sha1.update(packetFD['ServerID'])
+                    sha1.update(self.sharedSecret)
+                    sha1.update(packetFD['Public Key'])
+                    #lovely java style hex digest by barneygale
+                    serverid = Utils.javaHexDigest(sha1)
                     #Open up the url with the appropriate get parameters
                     url = "http://session.minecraft.net/game/joinserver.jsp?user=" + self.username + "&sessionId=" + self.sessionID + "&serverId=" + serverid
                     response = urllib2.urlopen(url).read()
@@ -151,10 +144,10 @@ class ServerConnection(threading.Thread):
                         print "Response from sessions.minecraft.net wasn't OK, it was " + response
                         return False
                         
-                    #Success \o/ We can now begin sending our stuff to the server
+                    #Success \o/ We can now begin sending our serverAddress to the server
                     
                     #Instantiate our main packet listener
-                    self.listener = PacketListener(self, self.window, self.socket, self.FileObject)
+                    self.listener = PacketListener(self, self.socket, self.FileObject)
                     self.listener.start()
                     
                     #Encrypt the verification token from earlier along with our shared secret with the server's rsa key
@@ -169,7 +162,17 @@ class ServerConnection(threading.Thread):
                     traceback.print_exc()
             else:
                 print "Server is in offline mode"
-                #TODO: handle offline mod servers
+                #Instantiate our main packet listener
+                self.listener = PacketListener(self, self.socket, self.FileObject)
+                self.listener.start()
+                
+                #Encrypt the verification token from earlier along with our shared secret with the server's rsa key
+                self.RSACipher = PKCS1_v1_5.new(self.pubkey)
+                encryptedSanityToken = self.RSACipher.encrypt(str(packetFD['Token']))
+                encryptedSharedSecret = self.RSACipher.encrypt(str(self.sharedSecret))
+                
+                #Send out a a packet FC to the server
+                PacketSenderManager.sendFC(self.socket, encryptedSharedSecret, encryptedSanityToken)
         except Exception, e:
             print "Connection to server failed"
             traceback.print_exc()
@@ -198,20 +201,19 @@ class EncryptedSocketObjectHandler():
         self.socket = socket
         self.cipher = cipher
     
-    def send(self, stuff):
-        self.socket.send(self.cipher.encrypt(stuff))
+    def send(self, serverAddress):
+        self.socket.send(self.cipher.encrypt(serverAddress))
     
     def close(self):
         self.socket.close()
                 
 class PacketListener(threading.Thread):
     
-    def __init__(self, connection, window, socket, FileObject):
+    def __init__(self, connection, socket, FileObject):
         threading.Thread.__init__(self)
         self.connection = connection
         self.socket = socket
         self.FileObject = FileObject
-        self.window = window
         self.encryptedConnection = False
         self.kill = False
         
