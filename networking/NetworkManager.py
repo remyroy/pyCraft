@@ -17,10 +17,11 @@ from Crypto.Cipher import PKCS1_v1_5
 from datetime import datetime
 
 from sqlalchemy import create_engine, MetaData, BigInteger, Integer, String
-from sqlalchemy import Column, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Boolean, DateTime, ForeignKey, Float
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
+import re
 
 EntityID = 0
 
@@ -55,6 +56,17 @@ class PlayerListItem(Base):
     ping = Column(Integer, nullable=False)
     online = Column(Boolean, nullable=False, index=True)
     created_on = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+class ServerPmTps(Base):
+    __tablename__ = 'server_pm_tps'
+
+    id = Column(BigInteger, primary_key=True)
+    server = Column(Integer, ForeignKey(Server.id), nullable=False, index=True)
+    tps = Column(Float(4), nullable=False)
+    created_on = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+tps_rex = r'^8    TPS: 6(?P<tps>\d+(\.\d+)?)$'
 
 class ServerConnection(threading.Thread):
     
@@ -243,6 +255,8 @@ class PacketListener(threading.Thread):
             elif(response == "\x01"):
                 packet = PacketListenerManager.handle01(self.FileObject)
                 print "Logged in \o/ Received an entity id of " + str(packet['EntityID'])
+
+                PacketSenderManager.send03(self.socket, '/ss')
             elif(response == "\x03"):
                 packet = PacketListenerManager.handle03(self.FileObject)
                 # Add "\x1b" because it is essential for ANSI escapes emitted by translate_escapes
@@ -250,6 +264,18 @@ class PacketListener(threading.Thread):
                 #print message.replace(u'\xa7', '&')
                 print filtered_string
                 packet['Message'] = filter(lambda x: x in string.printable, packet['Message'])
+
+                tps_match = re.match(tps_rex, packet['Message'])
+                if tps_match:
+                    tps = float(tps_match.group('tps'))
+
+                    spt = ServerPmTps()
+                    spt.server = self.connection.mc_server
+                    spt.tps = tps
+
+                    self.connection.session.add(spt)
+                    self.connection.session.commit()
+
             elif(response == "\x04"):
                 packet = PacketListenerManager.handle04(self.FileObject)
             elif(response == "\x05"):
